@@ -12,6 +12,14 @@
         Cross-Origin-Embedder-Policy: require-corp
         これにより opencascade.js の WASM マルチスレッド版が動作する。
     -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+            }
+        }
+        </script>
     <script src="./coi-serviceworker.js"></script>
 
     <style>
@@ -268,14 +276,7 @@
     <!-- 下部モードバッジ -->
     <div id="mode-badge">⬡ FaceID MODE — opencascade.js</div>
 </div>
-<script type="importmap">
-{
-    "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
-    }
-}
-</script>
+
 
     
 <!-- main.js は ES Module として読み込む -->
