@@ -125,25 +125,15 @@ loading.style.display = 'block';
 loading.innerText = 'Loading opencascade.js WASM...';
 
 const oc = await new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-
-    // opencascade.js シングルスレッドビルド（SharedArrayBuffer 不要版も動く）
-    // マルチスレッド版: https://cdn.jsdelivr.net/npm/opencascade.js@2.0.0-beta.202301020338/dist/opencascade.full.js
-    // シングルスレッド版（フォールバック）:
-    script.src = 'https://cdn.jsdelivr.net/npm/opencascade.js/dist/opencascade.full.js';
-    script.onload = async () => {
-        try {
-            const instance = await window.OpenCascade({
+    import('https://cdn.jsdelivr.net/npm/opencascade.js/dist/opencascade.full.js')
+        .then(({ default: OpenCascade }) => {
+            return OpenCascade({
                 locateFile: (path) =>
                     `https://cdn.jsdelivr.net/npm/opencascade.js/dist/${path}`
             });
-            resolve(instance);
-        } catch (e) {
-            reject(e);
-        }
-    };
-    script.onerror = reject;
-    document.head.appendChild(script);
+        })
+        .then(resolve)
+        .catch(reject);
 });
 
 loading.innerText = 'Drop STEP File';
