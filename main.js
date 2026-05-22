@@ -130,13 +130,12 @@ const oc = await new Promise((resolve, reject) => {
     // opencascade.js シングルスレッドビルド（SharedArrayBuffer 不要版も動く）
     // マルチスレッド版: https://cdn.jsdelivr.net/npm/opencascade.js@2.0.0-beta.202301020338/dist/opencascade.full.js
     // シングルスレッド版（フォールバック）:
-    script.src = 'https://cdn.jsdelivr.net/npm/opencascade.js@2.0.0-beta.202301020338/dist/opencascade.full.js';
+    script.src = 'https://cdn.jsdelivr.net/npm/opencascade.js/dist/opencascade.full.js';
     script.onload = async () => {
         try {
             const instance = await window.OpenCascade({
-                // WASM ファイルの場所を明示（CDN と同じオリジン or COEP 対応済み）
                 locateFile: (path) =>
-                    `https://cdn.jsdelivr.net/npm/opencascade.js@2.0.0-beta.202301020338/dist/${path}`
+                    `https://cdn.jsdelivr.net/npm/opencascade.js/dist/${path}`
             });
             resolve(instance);
         } catch (e) {
