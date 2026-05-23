@@ -411,7 +411,10 @@ function checkAndPaint(clientX, clientY, isFirstClick = false) {
     const intersects = raycaster.intersectObjects(currentModel.children, true);
     if (intersects.length === 0) return;
 
-    const intersect   = intersects[0];
+    // ★ 修正：ヒットしたオブジェクトの中から、最初に見つかった「メッシュ」だけを対象にする
+    const intersect = intersects.find(hit => hit.object.isMesh);
+    if (!intersect) return;
+
     const hitTriangle = intersect.faceIndex;
     if (hitTriangle === undefined) return;
 
