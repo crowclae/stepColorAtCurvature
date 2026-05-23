@@ -221,7 +221,6 @@
     <div id="sidebar">
         <h2>STEP Face Viewer</h2>
 
-        <!-- ファイル読み込み -->
         <div class="ctrl-row">
             <label>STEPファイル</label>
             <label class="file-btn">
@@ -230,13 +229,11 @@
             </label>
         </div>
 
-        <!-- ブラシカラー -->
         <div class="ctrl-row">
             <label>ブラシカラー</label>
             <input type="color" id="colorPicker" value="#e74c3c" />
         </div>
 
-        <!-- パレット -->
         <div class="ctrl-row">
             <label>カラーパレット</label>
             <div class="palette">
@@ -253,15 +250,13 @@
             </div>
         </div>
 
-        <!-- Undo -->
         <button class="action-btn" id="undoButton">↩ Undo</button>
         
-        <!-- エッジ表示 -->
         <button class="action-btn" id="toggleEdgesButton">エッジ表示切替</button>
 
         <div class="ctrl-row">
             <label>視点切り替え</label>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px;">
                 <button class="action-btn" id="viewPosX" style="padding: 4px;">+X</button>
                 <button class="action-btn" id="viewNegX" style="padding: 4px;">-X</button>
                 <button class="action-btn" id="viewPosY" style="padding: 4px;">+Y</button>
@@ -272,9 +267,6 @@
             <button class="action-btn" id="centerButton" style="margin-top: 4px; background: #047857; border-color: #059669;">🎯 センタリング</button>
         </div>
 
-        <div class="ctrl-row">
-
-        <!-- カラー保存 / 読み込み -->
         <div class="ctrl-row">
             <button class="action-btn" id="saveColorsButton">💾 カラーを保存</button>
             <label class="action-btn" style="display:block;cursor:pointer;">
