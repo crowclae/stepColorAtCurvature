@@ -12,11 +12,11 @@
 
 
 ////////////////////////////////////////////////////////////
-// Imports
+// Imports (★インポートマップ経由でローカルを参照)
 ////////////////////////////////////////////////////////////
 
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js';
-import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/controls/OrbitControls.js';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 
 ////////////////////////////////////////////////////////////
@@ -117,16 +117,15 @@ colorPicker.value = '#3498db';
 
 ////////////////////////////////////////////////////////////
 // opencascade.js 初期化
-// ES Module ビルドを動的 import() で読み込む
+// ★ローカルに配置したJSファイルとWASMファイルを動的インポート
 ////////////////////////////////////////////////////////////
 
 loading.style.display = 'block';
-loading.innerText = 'Loading opencascade.js WASM... (初回のみ約20〜40秒)';
+loading.innerText = 'Loading opencascade.js WASM...';
 
-const oc = await import('https://cdn.jsdelivr.net/npm/opencascade.js/dist/opencascade.full.js')
+const oc = await import('./libs/opencascade/opencascade.full.js')
     .then(({ default: OpenCascade }) => OpenCascade({
-        locateFile: (path) =>
-            `https://cdn.jsdelivr.net/npm/opencascade.js/dist/${path}`
+        locateFile: (path) => `./libs/opencascade/${path}`
     }));
 
 loading.innerText = 'Drop STEP File';
@@ -170,7 +169,6 @@ async function loadStepFile(file) {
         if (currentModel) {
             scene.remove(currentModel);
             currentModel.traverse((child) => {
-                // ★ child.isLineSegments を条件に追加
                 if (child.isMesh || child.isLineSegments) {
                     child.geometry.dispose();
                     child.material.dispose();
@@ -202,19 +200,18 @@ async function loadStepFile(file) {
         const shape = reader.OneShape();
 
         // ---- メッシュ化 ----
-        // 第2引数: 線形偏差、第4引数: 角度偏差[rad]
         loading.innerText = 'Tessellating faces...';
         new oc.BRepMesh_IncrementalMesh_2(shape, 0.1, false, 0.5, false);
 
         // ---- フェイスごとに頂点・法線・インデックスを収集 ----
         loading.innerText = 'Building FaceID map...';
 
-        const allPositions = [];  // 頂点座標
-        const allNormals   = [];  // 解析的頂点法線
-        const allIndices   = [];  // 三角形インデックス（インデックス付きジオメトリ用）
-        const allFaceIds   = [];  // 頂点ごとの faceId
+        const allPositions = [];  
+        const allNormals   = [];  
+        const allIndices   = [];  
+        const allFaceIds   = [];  
 
-        const faceGroupTmp = new Map();  // faceId → 三角形インデックス[]
+        const faceGroupTmp = new Map();  
 
         const explorer = new oc.TopExp_Explorer_1();
         explorer.Init(
@@ -224,14 +221,12 @@ async function loadStepFile(file) {
         );
 
         let faceId       = 0;
-        let vertexOffset = 0;  // フェイスごとの頂点オフセット
-        let triCounter   = 0;  // グローバル三角形カウンタ
+        let vertexOffset = 0;  
+        let triCounter   = 0;  
 
         while (explorer.More()) {
             const face       = oc.TopoDS.Face_1(explorer.Current());
             const location   = new oc.TopLoc_Location_1();
-
-            // BRep_Tool.Triangulation は引数2つ（バージョン依存）
             const polyHandle = oc.BRep_Tool.Triangulation(face, location);
 
             if (polyHandle.IsNull()) {
@@ -249,12 +244,10 @@ async function loadStepFile(file) {
             const sign       = isReversed ? -1 : 1;
             const hasNormals = tris.HasNormals();
 
-            // ---- 頂点座標と解析的法線を収集（1-indexed）----
             for (let v = 1; v <= nNodes; v++) {
                 const pnt = tris.Node(v);
                 let x = pnt.X(), y = pnt.Y(), z = pnt.Z();
 
-                // ローカル座標 → グローバル座標変換
                 if (hasTrsf && trsf) {
                     const tp = pnt.Transformed(trsf);
                     x = tp.X(); y = tp.Y(); z = tp.Z();
@@ -262,18 +255,14 @@ async function loadStepFile(file) {
                 allPositions.push(x, y, z);
                 allFaceIds.push(faceId);
 
-                // tris.Normal(v) : BRepMesh が解析曲面から計算した頂点法線
-                // 円柱・球・NURBS で頂点ごとに正確な法線が得られる
                 if (hasNormals) {
                     const n = tris.Normal(v);
                     allNormals.push(n.X() * sign, n.Y() * sign, n.Z() * sign);
                 } else {
-                    // フォールバック用のプレースホルダ（後で外積で補完）
                     allNormals.push(0, 1, 0);
                 }
             }
 
-            // ---- 三角形インデックスを収集 ----
             const triGroup = [];
 
             for (let t = 1; t <= nTris; t++) {
@@ -282,7 +271,6 @@ async function loadStepFile(file) {
                 const i2  = tri.Value(2) - 1 + vertexOffset;
                 const i3  = tri.Value(3) - 1 + vertexOffset;
 
-                // REVERSED フェイスは巻き順を反転して裏面を防ぐ
                 if (isReversed) {
                     allIndices.push(i1, i3, i2);
                 } else {
@@ -301,7 +289,7 @@ async function loadStepFile(file) {
             throw new Error('No triangles found. STEP file may be empty or invalid.');
         }
 
-        // ---- Three.js BufferGeometry（インデックス付き）----
+        // ---- Three.js BufferGeometry ----
         loading.innerText = 'Building Three.js geometry...';
 
         const geometry = new THREE.BufferGeometry();
@@ -315,18 +303,14 @@ async function loadStepFile(file) {
             new THREE.Float32BufferAttribute(allNormals, 3)
         );
 
-        // faceId を頂点属性として格納（CPU 参照のみ）
         const faceIdArray = new Float32Array(allFaceIds);
         geometry.setAttribute(
             'faceId',
             new THREE.BufferAttribute(faceIdArray, 1)
         );
 
-        // インデックスをセット（頂点共有でスムーズシェーディングが有効になる）
         geometry.setIndex(allIndices);
 
-        // HasNormals() が false だったフェイスの法線を補完
-        // （インデックス付きジオメトリなので隣接頂点と補間される）
         const normalAttr = geometry.attributes.normal;
         const hasZeroNormal = allNormals.some((v, i) =>
             i % 3 === 1 && allNormals[i-1] === 0 && v === 1 && allNormals[i+1] === 0
@@ -335,10 +319,8 @@ async function loadStepFile(file) {
             geometry.computeVertexNormals();
         }
 
-
-        // 頂点カラー（デフォルト：#3498db）
         const vertexCount = allPositions.length / 3;
-        const defaultColor = new THREE.Color('#3498db'); // HEXで直接指定
+        const defaultColor = new THREE.Color('#3498db'); 
         const colors = new Float32Array(vertexCount * 3);
         for (let i = 0; i < vertexCount; i++) {
             colors[i * 3]     = defaultColor.r;
@@ -358,24 +340,20 @@ async function loadStepFile(file) {
         mesh.castShadow    = true;
         mesh.receiveShadow = true;
 
-        // ★ 追記：エッジライン（稜線）の生成
-        // 第2引数の「24」はしきい値角度です。これより急な角度の境界に線を引きます。
-        // フェイス間の境界は頂点が分離しているため、角度に関係なく綺麗に線が残ります。
         const edgesGeometry = new THREE.EdgesGeometry(geometry, 24);
         const edgesMaterial = new THREE.LineBasicMaterial({ 
-            color: 0x555555, // 背景(0x1e1e1e)に対して見やすい暗めのグレー（または0xffffffなど）
-            linewidth: 1     // WebGLの制限で基本1固定
+            color: 0x555555, 
+            linewidth: 1     
         });
         const edgeLines = new THREE.LineSegments(edgesGeometry, edgesMaterial);
         edgeLines.name = 'edgeLines';
-        edgeLines.visible = showEdges; // 現在のステートを反映
+        edgeLines.visible = showEdges; 
 
         currentModel = new THREE.Group();
         currentModel.add(mesh);
-        currentModel.add(edgeLines); // ★ グループに追加
+        currentModel.add(edgeLines); 
         scene.add(currentModel);
 
-        // グローバルマップに昇格
         faceGroupMap    = faceGroupTmp;
         faceIdPerVertex = faceIdArray;
 
@@ -394,9 +372,6 @@ async function loadStepFile(file) {
 
 ////////////////////////////////////////////////////////////
 // Paint Core
-//
-// raycaster で当たった三角形 → インデックス経由で頂点 → faceId 取得
-// → faceGroupMap で同 faceId の全三角形を一括塗りつぶし
 ////////////////////////////////////////////////////////////
 
 function checkAndPaint(clientX, clientY, isFirstClick = false) {
@@ -411,7 +386,6 @@ function checkAndPaint(clientX, clientY, isFirstClick = false) {
     const intersects = raycaster.intersectObjects(currentModel.children, true);
     if (intersects.length === 0) return;
 
-    // ★ 修正：ヒットしたオブジェクトの中から、最初に見つかった「メッシュ」だけを対象にする
     const intersect = intersects.find(hit => hit.object.isMesh);
     if (!intersect) return;
 
@@ -422,7 +396,6 @@ function checkAndPaint(clientX, clientY, isFirstClick = false) {
     const indexAttr  = geometry.index;
     const faceIdAttr = geometry.attributes.faceId;
 
-    // インデックス付きジオメトリ：三角形の最初の頂点インデックス経由で faceId を取得
     const vertexIndex = indexAttr.getX(hitTriangle * 3);
     const faceIdVal   = Math.round(faceIdAttr.getX(vertexIndex));
 
@@ -439,7 +412,6 @@ function checkAndPaint(clientX, clientY, isFirstClick = false) {
 
 ////////////////////////////////////////////////////////////
 // 指定三角形グループに頂点カラーを適用
-// インデックス付きジオメトリ対応版
 ////////////////////////////////////////////////////////////
 
 function applyColorToFaceGroup(mesh, triangleIndices, hexColor) {
@@ -619,13 +591,9 @@ if (toggleEdgesButton) {
     toggleEdgesButton.addEventListener('click', () => {
         if (!currentModel) return;
 
-        // 状態を反転
         showEdges = !showEdges;
-        
-        // ボタンのテキストを更新
         toggleEdgesButton.innerText = showEdges ? 'エッジ非表示' : 'エッジ表示';
 
-        // グループ内からエッジオブジェクトを探して可視性を切り替え
         const edgeLines = currentModel.getObjectByName('edgeLines');
         if (edgeLines) {
             edgeLines.visible = showEdges;
