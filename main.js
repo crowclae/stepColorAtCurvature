@@ -35,6 +35,7 @@ const undoButton        = document.getElementById('undoButton');
 const saveColorsButton  = document.getElementById('saveColorsButton');
 const importColorsFile  = document.getElementById('importColorsFile');
 const toggleEdgesButton = document.getElementById('toggleEdgesButton');
+const toggleGridButton  = document.getElementById('toggleGridButton');
 
 // ★追加: 視点・センタリングボタンの取得
 const viewPosXBtn = document.getElementById('viewPosX');
