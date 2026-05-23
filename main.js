@@ -36,6 +36,14 @@ const saveColorsButton  = document.getElementById('saveColorsButton');
 const importColorsFile  = document.getElementById('importColorsFile');
 const toggleEdgesButton = document.getElementById('toggleEdgesButton');
 
+// ★追加: 視点・センタリングボタンの取得
+const viewPosXBtn = document.getElementById('viewPosX');
+const viewNegXBtn = document.getElementById('viewNegX');
+const viewPosYBtn = document.getElementById('viewPosY');
+const viewNegYBtn = document.getElementById('viewNegY');
+const viewPosZBtn = document.getElementById('viewPosZ');
+const viewNegZBtn = document.getElementById('viewNegZ');
+const centerButton = document.getElementById('centerButton');
 
 ////////////////////////////////////////////////////////////
 // Scene
@@ -601,6 +609,52 @@ if (toggleEdgesButton) {
     });
 }
 
+////////////////////////////////////////////////////////////
+// ★追加: カメラ視点切り替え & センタリング
+////////////////////////////////////////////////////////////
+
+// 現在のターゲットからの距離を維持して、指定した軸方向へカメラを移動する
+function setCameraDirection(axis, sign) {
+    if (!controls) return;
+
+    // 現在のターゲット（注視点）を取得
+    const target = controls.target.clone();
+    
+    // 現在のカメラとターゲットの距離を計算（距離を維持するため）
+    const distance = camera.position.distanceTo(target);
+
+    // 新しいカメラ位置の計算
+    const newPos = target.clone();
+    if (axis === 'x') newPos.x += distance * sign;
+    if (axis === 'y') newPos.y += distance * sign;
+    if (axis === 'z') newPos.z += distance * sign;
+
+    camera.position.copy(newPos);
+
+    // 真上・真下（+Y, -Y）を向いたときにカメラのUPベクトルがジンバルロックを起こさないよう補正
+    if (axis === 'y') {
+        camera.up.set(0, 0, sign === 1 ? -1 : 1);
+    } else {
+        camera.up.set(0, 1, 0); // 通常はY軸が上
+    }
+
+    controls.update();
+}
+
+// 各ボタンのイベントリスナー登録
+viewPosXBtn.addEventListener('click', () => setCameraDirection('x', 1));
+viewNegXBtn.addEventListener('click', () => setCameraDirection('x', -1));
+viewPosYBtn.addEventListener('click', () => setCameraDirection('y', 1));
+viewNegYBtn.addEventListener('click', () => setCameraDirection('y', -1));
+viewPosZBtn.addEventListener('click', () => setCameraDirection('z', 1));
+viewNegZBtn.addEventListener('click', () => setCameraDirection('z', -1));
+
+// センタリングボタンの処理
+centerButton.addEventListener('click', () => {
+    if (!currentModel) return;
+    // 既存のフィッティング関数を呼び出すことで、中心移動＋全体表示を行います
+    fitCameraToObject(currentModel);
+});
 
 ////////////////////////////////////////////////////////////
 // Resize

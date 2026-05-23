@@ -259,6 +259,21 @@
         <!-- エッジ表示 -->
         <button class="action-btn" id="toggleEdgesButton">エッジ表示切替</button>
 
+        <div class="ctrl-row">
+            <label>視点切り替え</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                <button class="action-btn" id="viewPosX" style="padding: 4px;">+X</button>
+                <button class="action-btn" id="viewNegX" style="padding: 4px;">-X</button>
+                <button class="action-btn" id="viewPosY" style="padding: 4px;">+Y</button>
+                <button class="action-btn" id="viewNegY" style="padding: 4px;">-Y</button>
+                <button class="action-btn" id="viewPosZ" style="padding: 4px;">+Z</button>
+                <button class="action-btn" id="viewNegZ" style="padding: 4px;">-Z</button>
+            </div>
+            <button class="action-btn" id="centerButton" style="margin-top: 4px; background: #047857; border-color: #059669;">🎯 センタリング</button>
+        </div>
+
+        <div class="ctrl-row">
+
         <!-- カラー保存 / 読み込み -->
         <div class="ctrl-row">
             <button class="action-btn" id="saveColorsButton">💾 カラーを保存</button>
