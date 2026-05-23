@@ -333,7 +333,16 @@ async function loadStepFile(file) {
 
         // 頂点カラー（デフォルト：グレー）
         const vertexCount = allPositions.length / 3;
-        const colors = new Float32Array(vertexCount * 3).fill(0.72);
+        // 変更後
+        const r = 52  / 255;
+        const g = 152 / 255;
+        const b = 219 / 255;
+        const colors = new Float32Array(vertexCount * 3);
+        for (let i = 0; i < vertexCount; i++) {
+            colors[i * 3]     = r;
+            colors[i * 3 + 1] = g;
+            colors[i * 3 + 2] = b;
+        }
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
         const material = new THREE.MeshStandardMaterial({
