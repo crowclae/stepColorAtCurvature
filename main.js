@@ -54,15 +54,22 @@ scene.background = new THREE.Color(0x1e1e1e);
 
 
 ////////////////////////////////////////////////////////////
-// Camera
+// Camera (修正版: OrthographicCamera)
 ////////////////////////////////////////////////////////////
 
-const camera = new THREE.PerspectiveCamera(
-    45,
-    window.innerWidth / window.innerHeight,
-    0.1,
-    100000
+// 表示領域のサイズ（値が大きいほど広範囲が見えます。後でオブジェクトに合わせて自動調整されます）
+const viewSize = 300;
+const aspect = window.innerWidth / window.innerHeight;
+
+const camera = new THREE.OrthographicCamera(
+    -viewSize * aspect / 2, // Left
+     viewSize * aspect / 2, // Right
+     viewSize / 2,          // Top
+    -viewSize / 2,          // Bottom
+    0.1,                    // Near
+    100000                  // Far
 );
+// カメラの位置（パースが効かないため、位置の「距離」は見た目の大きさに影響せず「方向」のみに影響します）
 camera.position.set(150, 120, 150);
 
 
@@ -573,7 +580,7 @@ importColorsFile.addEventListener('change', (e) => {
 
 
 ////////////////////////////////////////////////////////////
-// Camera Fit
+// Camera Fit (修正版: OrthographicCamera用)
 ////////////////////////////////////////////////////////////
 
 function fitCameraToObject(obj) {
@@ -581,10 +588,24 @@ function fitCameraToObject(obj) {
     const center = box.getCenter(new THREE.Vector3());
     const size   = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const dist   = maxDim * 1.5;
 
-    camera.position.set(center.x + dist, center.y + dist, center.z + dist);
+    // オブジェクトが画面に収まるように OrthographicCamera の表示範囲（ズーム）を調整
+    const aspect = window.innerWidth / window.innerHeight;
+    
+    // 余裕を持たせるためのマージン（1.2倍）
+    const baseSize = maxDim * 1.2;
+
+    camera.left   = -baseSize * aspect / 2;
+    camera.right  =  baseSize * aspect / 2;
+    camera.top    =  baseSize / 2;
+    camera.bottom = -baseSize / 2;
+
+    // 現在のカメラの向き（ベクトル）を維持したまま、中心位置を基準にカメラを後ろに下げる
+    const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+    camera.position.copy(center).addScaledVector(dir, maxDim * 2);
+
     controls.target.copy(center);
+    
     camera.near = maxDim / 100;
     camera.far  = maxDim * 100;
     camera.updateProjectionMatrix();
@@ -672,12 +693,21 @@ centerButton.addEventListener('click', () => {
     
     console.log('Centered object while keeping current view angle.');
 });
+
 ////////////////////////////////////////////////////////////
-// Resize
+// Resize (修正版: OrthographicCamera用)
 ////////////////////////////////////////////////////////////
 
 window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
+    const aspect = window.innerWidth / window.innerHeight;
+    
+    // 現在の表示幅（高さ基準）を維持したまま左右の範囲を再計算
+    const currentHeight = camera.top - camera.bottom;
+    
+    camera.left   = -currentHeight * aspect / 2;
+    camera.right  =  currentHeight * aspect / 2;
+    // top と bottom は維持
+    
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
