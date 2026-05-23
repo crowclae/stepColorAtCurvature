@@ -1,13 +1,13 @@
 ////////////////////////////////////////////////////////////
 // main.js  –  STEP Face Viewer (FaceID Mode)
 //
-// 変更点サマリー（旧 occtimportjs → opencascade.js）
-//
-//  1. opencascade.js (WASM) で STEP を読み込み
-//  2. TopExp_Explorer でフェイスを列挙 → 各三角形に faceId を付与
-//  3. BFS はノーマル角度ではなく faceId の一致で行う（完全一致）
-//  4. computeVertexNormals() を呼ばず解析的法線を維持
-//  5. coi-serviceworker.js が SharedArrayBuffer を有効化
+//  - opencascade.js (WASM) で STEP を読み込み
+//  - TopExp_Explorer でフェイスを列挙 → 各頂点に faceId を付与
+//  - インデックス付き BufferGeometry で頂点を共有
+//  - tris.Normal(v) による解析的頂点法線（円柱・球が滑らか）
+//  - REVERSED フェイスは巻き順を反転して法線方向を統一
+//  - BFS なし：faceGroupMap の完全一致で塗りつぶし
+//  - coi-serviceworker.js が COOP/COEP ヘッダを注入
 ////////////////////////////////////////////////////////////
 
 
@@ -23,15 +23,15 @@ import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/exampl
 // HTML Elements
 ////////////////////////////////////////////////////////////
 
-const canvas          = document.getElementById('viewer');
-const stepFileInput   = document.getElementById('stepFile');
-const colorPicker     = document.getElementById('colorPicker');
-const loading         = document.getElementById('loading');
-const faceIdLabel     = document.getElementById('faceId');
-const meshNameLabel   = document.getElementById('meshName');
-const triCountLabel   = document.getElementById('triCount');
-const viewerContainer = document.getElementById('viewer-container');
-const undoButton      = document.getElementById('undoButton');
+const canvas            = document.getElementById('viewer');
+const stepFileInput     = document.getElementById('stepFile');
+const colorPicker       = document.getElementById('colorPicker');
+const loading           = document.getElementById('loading');
+const faceIdLabel       = document.getElementById('faceId');
+const meshNameLabel     = document.getElementById('meshName');
+const triCountLabel     = document.getElementById('triCount');
+const viewerContainer   = document.getElementById('viewer-container');
+const undoButton        = document.getElementById('undoButton');
 const saveColorsButton  = document.getElementById('saveColorsButton');
 const importColorsFile  = document.getElementById('importColorsFile');
 
@@ -105,8 +105,8 @@ const mouse     = new THREE.Vector2();
 ////////////////////////////////////////////////////////////
 
 let currentModel    = null;
-let faceIdMap       = null;   // Int32Array: 三角形インデックス → faceId
-let faceGroupMap    = null;   // Map<faceId, faceTriangleIndices[]>
+let faceGroupMap    = null;   // Map<faceId, 三角形インデックス[]>
+let faceIdPerVertex = null;   // Float32Array: 頂点インデックス → faceId
 let isLeftMouseDown = false;
 let isRotating      = false;
 let colorHistory    = [];
@@ -115,26 +115,17 @@ const MAX_HISTORY   = 20;
 
 ////////////////////////////////////////////////////////////
 // opencascade.js 初期化
-//
-// CDN から動的 import する。
-// opencascade.js はグローバルに OpenCascade() を公開する UMD スクリプトなので
-// import() ではなく script タグで読み込んだ後に window.OpenCascade() を呼ぶ。
+// ES Module ビルドを動的 import() で読み込む
 ////////////////////////////////////////////////////////////
 
 loading.style.display = 'block';
-loading.innerText = 'Loading opencascade.js WASM...';
+loading.innerText = 'Loading opencascade.js WASM... (初回のみ約20〜40秒)';
 
-const oc = await new Promise((resolve, reject) => {
-    import('https://cdn.jsdelivr.net/npm/opencascade.js/dist/opencascade.full.js')
-        .then(({ default: OpenCascade }) => {
-            return OpenCascade({
-                locateFile: (path) =>
-                    `https://cdn.jsdelivr.net/npm/opencascade.js/dist/${path}`
-            });
-        })
-        .then(resolve)
-        .catch(reject);
-});
+const oc = await import('https://cdn.jsdelivr.net/npm/opencascade.js/dist/opencascade.full.js')
+    .then(({ default: OpenCascade }) => OpenCascade({
+        locateFile: (path) =>
+            `https://cdn.jsdelivr.net/npm/opencascade.js/dist/${path}`
+    }));
 
 loading.innerText = 'Drop STEP File';
 console.log('OpenCascade.js Ready', oc);
@@ -165,7 +156,7 @@ viewerContainer.addEventListener('drop', async (e) => {
 
 
 ////////////////////////////////////////////////////////////
-// STEP Loader（メイン処理）
+// STEP Loader
 ////////////////////////////////////////////////////////////
 
 async function loadStepFile(file) {
@@ -184,172 +175,171 @@ async function loadStepFile(file) {
             });
             currentModel = null;
         }
-        faceIdMap    = null;
-        faceGroupMap = null;
-        colorHistory = [];
+        faceGroupMap    = null;
+        faceIdPerVertex = null;
+        colorHistory    = [];
 
-        // ArrayBuffer → Uint8Array
-        const arrayBuffer = await file.arrayBuffer();
-        const fileData    = new Uint8Array(arrayBuffer);
-
-        // ---- opencascade.js でファイルを仮想 FS に書き込み ----
-        loading.innerText = 'Parsing STEP geometry...';
-
+        // ArrayBuffer → Uint8Array → 仮想 FS
+        const fileData = new Uint8Array(await file.arrayBuffer());
         oc.FS.createDataFile('/', 'model.step', fileData, true, true, true);
 
-        // STEP リーダー
-        const reader = new oc.STEPControl_Reader_1();
+        // ---- STEP 読み込み ----
+        loading.innerText = 'Parsing STEP geometry...';
+
+        const reader     = new oc.STEPControl_Reader_1();
         const readResult = reader.ReadFile('model.step');
+        oc.FS.unlink('/model.step');
 
         if (readResult !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) {
-            throw new Error('STEP file read failed. Status: ' + readResult);
+            throw new Error('STEP read failed. Status: ' + readResult);
         }
 
         reader.TransferRoots(new oc.Message_ProgressRange_1());
         const shape = reader.OneShape();
 
-        // 仮想 FS をクリーン
-        oc.FS.unlink('/model.step');
-
         // ---- メッシュ化 ----
+        // 第2引数: 線形偏差、第4引数: 角度偏差[rad]
         loading.innerText = 'Tessellating faces...';
-
-        // BRepMesh_IncrementalMesh: 線偏差 0.1, 角度偏差 0.5rad
         new oc.BRepMesh_IncrementalMesh_2(shape, 0.1, false, 0.5, false);
 
-        // ---- フェイスごとに三角形を収集 ----
+        // ---- フェイスごとに頂点・法線・インデックスを収集 ----
         loading.innerText = 'Building FaceID map...';
 
-        const positions  = [];   // [x,y,z, x,y,z, ...]
-        const normals    = [];   // [nx,ny,nz, ...]  解析的法線
-        const faceIds    = [];   // 三角形ごとの faceId (Int32 相当)
+        const allPositions = [];  // 頂点座標
+        const allNormals   = [];  // 解析的頂点法線
+        const allIndices   = [];  // 三角形インデックス（インデックス付きジオメトリ用）
+        const allFaceIds   = [];  // 頂点ごとの faceId
 
-        // フェイスグループ: faceId → 三角形インデックスの配列
-        const faceGroupTmp = new Map();
+        const faceGroupTmp = new Map();  // faceId → 三角形インデックス[]
 
         const explorer = new oc.TopExp_Explorer_1();
-        explorer.Init(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+        explorer.Init(
+            shape,
+            oc.TopAbs_ShapeEnum.TopAbs_FACE,
+            oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+        );
 
-        let faceId        = 0;
-        let triangleIndex = 0;  // グローバル三角形カウンタ
+        let faceId       = 0;
+        let vertexOffset = 0;  // フェイスごとの頂点オフセット
+        let triCounter   = 0;  // グローバル三角形カウンタ
 
         while (explorer.More()) {
-            const face        = oc.TopoDS.Face_1(explorer.Current());
-            const location    = new oc.TopLoc_Location_1();
-            const triangulation = oc.BRep_Tool.Triangulation(face, location);
+            const face       = oc.TopoDS.Face_1(explorer.Current());
+            const location   = new oc.TopLoc_Location_1();
 
-            if (triangulation.IsNull()) {
+            // BRep_Tool.Triangulation は引数2つ（バージョン依存）
+            const polyHandle = oc.BRep_Tool.Triangulation(face, location);
+
+            if (polyHandle.IsNull()) {
                 explorer.Next();
                 faceId++;
                 continue;
             }
 
-            const tris  = triangulation.get();
-            const nTris = tris.NbTriangles();
-            const nVtx  = tris.NbNodes();
+            const tris       = polyHandle.get();
+            const nNodes     = tris.NbNodes();
+            const nTris      = tris.NbTriangles();
+            const hasTrsf    = !location.IsIdentity();
+            const trsf       = hasTrsf ? location.Transformation() : null;
+            const isReversed = face.Orientation_1() === oc.TopAbs_Orientation.TopAbs_REVERSED;
+            const sign       = isReversed ? -1 : 1;
+            const hasNormals = tris.HasNormals();
 
-            // 変換行列（ローカル → グローバル座標）
-            const transform = location.IsIdentity()
-                ? null
-                : location.IsIdentity() ? null : location.Transformation();
-
-            // 頂点座標を取得（1-indexed）
-            const vtxCoords = [];
-            for (let v = 1; v <= nVtx; v++) {
+            // ---- 頂点座標と解析的法線を収集（1-indexed）----
+            for (let v = 1; v <= nNodes; v++) {
                 const pnt = tris.Node(v);
                 let x = pnt.X(), y = pnt.Y(), z = pnt.Z();
-                if (transform) {
-                    const tp = pnt.Transformed(transform);
+
+                // ローカル座標 → グローバル座標変換
+                if (hasTrsf && trsf) {
+                    const tp = pnt.Transformed(trsf);
                     x = tp.X(); y = tp.Y(); z = tp.Z();
                 }
-                vtxCoords.push([x, y, z]);
+                allPositions.push(x, y, z);
+                allFaceIds.push(faceId);
+
+                // tris.Normal(v) : BRepMesh が解析曲面から計算した頂点法線
+                // 円柱・球・NURBS で頂点ごとに正確な法線が得られる
+                if (hasNormals) {
+                    const n = tris.Normal(v);
+                    allNormals.push(n.X() * sign, n.Y() * sign, n.Z() * sign);
+                } else {
+                    // フォールバック用のプレースホルダ（後で外積で補完）
+                    allNormals.push(0, 1, 0);
+                }
             }
 
-            // 法線の計算：BRepGProp_Face を使い UV 点から解析的法線を取得
-            const gpropFace = new oc.BRepGProp_Face_1(face);
-
+            // ---- 三角形インデックスを収集 ----
             const triGroup = [];
 
             for (let t = 1; t <= nTris; t++) {
                 const tri = tris.Triangle(t);
+                const i1  = tri.Value(1) - 1 + vertexOffset;
+                const i2  = tri.Value(2) - 1 + vertexOffset;
+                const i3  = tri.Value(3) - 1 + vertexOffset;
 
-                // OCC は 1-indexed
-                const i1 = tri.Value(1) - 1;
-                const i2 = tri.Value(2) - 1;
-                const i3 = tri.Value(3) - 1;
-
-                const p1 = vtxCoords[i1];
-                const p2 = vtxCoords[i2];
-                const p3 = vtxCoords[i3];
-
-                // 三角形重心の UV 座標を BRepGProp_Face::Normal で取得
-                // （UV の中点近似。精度が必要な場合は BRep_Tool::Parameters を使う）
-                const cx = (p1[0] + p2[0] + p3[0]) / 3;
-                const cy = (p1[1] + p2[1] + p3[1]) / 3;
-                const cz = (p1[2] + p2[2] + p3[2]) / 3;
-
-                // 各頂点を push（non-indexed 形式）
-                positions.push(...p1, ...p2, ...p3);
-
-                // 解析的法線: BRepGProp_Face.Normal(u, v, point, normal) を使いたいが
-                // 三角形メッシュの各頂点に対応する UV は
-                // BRep_Tool::Parameters で取得するのが正確。
-                // ここでは三角形法線（外積）+ 面の向きで代用。
-                // ※ 真の解析的法線が必要な場合は下記の拡張を参照。
-                const ax = p2[0]-p1[0], ay = p2[1]-p1[1], az = p2[2]-p1[2];
-                const bx = p3[0]-p1[0], by = p3[1]-p1[1], bz = p3[2]-p1[2];
-                let nx = ay*bz - az*by;
-                let ny = az*bx - ax*bz;
-                let nz = ax*by - ay*bx;
-                const len = Math.sqrt(nx*nx + ny*ny + nz*nz) || 1;
-                nx /= len; ny /= len; nz /= len;
-
-                // フェイスの向き（REVERSED なら法線を反転）
-                const orientation = face.Orientation_1();
-                const sign = (orientation === oc.TopAbs_Orientation.TopAbs_REVERSED) ? -1 : 1;
-
-                normals.push(
-                    nx*sign, ny*sign, nz*sign,
-                    nx*sign, ny*sign, nz*sign,
-                    nx*sign, ny*sign, nz*sign
-                );
-
-                faceIds.push(faceId, faceId, faceId);  // 3頂点分
-                triGroup.push(triangleIndex);
-                triangleIndex++;
+                // REVERSED フェイスは巻き順を反転して裏面を防ぐ
+                if (isReversed) {
+                    allIndices.push(i1, i3, i2);
+                } else {
+                    allIndices.push(i1, i2, i3);
+                }
+                triGroup.push(triCounter++);
             }
 
             faceGroupTmp.set(faceId, triGroup);
+            vertexOffset += nNodes;
             faceId++;
             explorer.Next();
         }
 
-        if (positions.length === 0) {
-            throw new Error('No triangles found. Check STEP file validity.');
+        if (allPositions.length === 0) {
+            throw new Error('No triangles found. STEP file may be empty or invalid.');
         }
 
-        // ---- Three.js BufferGeometry 構築 ----
+        // ---- Three.js BufferGeometry（インデックス付き）----
         loading.innerText = 'Building Three.js geometry...';
 
         const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-        geometry.setAttribute('normal',   new THREE.Float32BufferAttribute(normals,   3));
 
-        // faceId を Int32BufferAttribute として格納
-        // Three.js は整数属性をシェーダに渡す場合 isIntAttribute = true が必要だが、
-        // ここでは CPU 側でのみ参照するため Float32 でも問題ない。
-        const faceIdArray = new Float32Array(faceIds);
-        geometry.setAttribute('faceId', new THREE.BufferAttribute(faceIdArray, 1));
+        geometry.setAttribute(
+            'position',
+            new THREE.Float32BufferAttribute(allPositions, 3)
+        );
+        geometry.setAttribute(
+            'normal',
+            new THREE.Float32BufferAttribute(allNormals, 3)
+        );
+
+        // faceId を頂点属性として格納（CPU 参照のみ）
+        const faceIdArray = new Float32Array(allFaceIds);
+        geometry.setAttribute(
+            'faceId',
+            new THREE.BufferAttribute(faceIdArray, 1)
+        );
+
+        // インデックスをセット（頂点共有でスムーズシェーディングが有効になる）
+        geometry.setIndex(allIndices);
+
+        // HasNormals() が false だったフェイスの法線を補完
+        // （インデックス付きジオメトリなので隣接頂点と補間される）
+        const normalAttr = geometry.attributes.normal;
+        const hasZeroNormal = allNormals.some((v, i) =>
+            i % 3 === 1 && allNormals[i-1] === 0 && v === 1 && allNormals[i+1] === 0
+        );
+        if (hasZeroNormal) {
+            geometry.computeVertexNormals();
+        }
 
         // 頂点カラー（デフォルト：グレー）
-        const vertexCount = geometry.attributes.position.count;
+        const vertexCount = allPositions.length / 3;
         const colors = new Float32Array(vertexCount * 3).fill(0.72);
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
         const material = new THREE.MeshStandardMaterial({
             vertexColors: true,
-            metalness: 0.05,
-            roughness: 0.65
+            metalness:    0.05,
+            roughness:    0.65,
         });
 
         const mesh = new THREE.Mesh(geometry, material);
@@ -362,14 +352,14 @@ async function loadStepFile(file) {
         scene.add(currentModel);
 
         // グローバルマップに昇格
-        faceIdMap    = faceIdArray;
-        faceGroupMap = faceGroupTmp;
+        faceGroupMap    = faceGroupTmp;
+        faceIdPerVertex = faceIdArray;
 
-        triCountLabel.innerText = (positions.length / 9).toLocaleString();
-
+        triCountLabel.innerText = triCounter.toLocaleString();
         fitCameraToObject(currentModel);
+
         loading.style.display = 'none';
-        console.log(`STEP loaded: ${faceId} faces, ${positions.length / 9} triangles`);
+        console.log(`STEP loaded: ${faceId} faces, ${triCounter} triangles`);
 
     } catch (err) {
         console.error(err);
@@ -379,27 +369,16 @@ async function loadStepFile(file) {
 
 
 ////////////////////////////////////////////////////////////
-// FaceID ベース 塗りつぶし
-// （旧: 法線角度 BFS → 新: faceId の完全一致）
-//
-// クリックした三角形の faceId を取得し、
-// 同じ faceId を持つ全三角形を一括塗りつぶす。
-// これは B-Rep の「1フェイス = 1解析面」に対応する。
-////////////////////////////////////////////////////////////
-
-function findFaceTriangles(faceId) {
-    return faceGroupMap.get(faceId) || [];
-}
-
-
-////////////////////////////////////////////////////////////
 // Paint Core
+//
+// raycaster で当たった三角形 → インデックス経由で頂点 → faceId 取得
+// → faceGroupMap で同 faceId の全三角形を一括塗りつぶし
 ////////////////////////////////////////////////////////////
 
 function checkAndPaint(clientX, clientY, isFirstClick = false) {
     if (!currentModel || !faceGroupMap) return;
 
-    const rect  = canvas.getBoundingClientRect();
+    const rect = canvas.getBoundingClientRect();
     mouse.x =  ((clientX - rect.left) / rect.width)  * 2 - 1;
     mouse.y = -((clientY - rect.top)  / rect.height) * 2 + 1;
 
@@ -408,41 +387,49 @@ function checkAndPaint(clientX, clientY, isFirstClick = false) {
     const intersects = raycaster.intersectObjects(currentModel.children, true);
     if (intersects.length === 0) return;
 
-    const intersect    = intersects[0];
-    const hitTriangle  = intersect.faceIndex;  // 三角形インデックス
+    const intersect   = intersects[0];
+    const hitTriangle = intersect.faceIndex;
     if (hitTriangle === undefined) return;
 
-    // ---- faceId の読み取り ----
-    // faceIdArray は「頂点ごと」に格納されているので三角形 → 頂点0 のインデックスは hitTriangle*3
-    const faceIdVal = Math.round(faceIdMap[hitTriangle * 3]);
+    const geometry   = intersect.object.geometry;
+    const indexAttr  = geometry.index;
+    const faceIdAttr = geometry.attributes.faceId;
 
-    faceIdLabel.innerText  = faceIdVal;
+    // インデックス付きジオメトリ：三角形の最初の頂点インデックス経由で faceId を取得
+    const vertexIndex = indexAttr.getX(hitTriangle * 3);
+    const faceIdVal   = Math.round(faceIdAttr.getX(vertexIndex));
+
+    faceIdLabel.innerText   = faceIdVal;
     meshNameLabel.innerText = `Face_${faceIdVal}`;
 
-    const targetMesh    = intersect.object;
-    const sameIdFaces   = findFaceTriangles(faceIdVal);
+    const targetMesh  = intersect.object;
+    const sameIdTris  = faceGroupMap.get(faceIdVal) || [];
 
     if (isFirstClick) saveHistory(targetMesh);
-
-    applyColorToFaceGroup(targetMesh, sameIdFaces, colorPicker.value);
+    applyColorToFaceGroup(targetMesh, sameIdTris, colorPicker.value);
 }
 
 
 ////////////////////////////////////////////////////////////
 // 指定三角形グループに頂点カラーを適用
+// インデックス付きジオメトリ対応版
 ////////////////////////////////////////////////////////////
 
 function applyColorToFaceGroup(mesh, triangleIndices, hexColor) {
-    const colorAttr = mesh.geometry.attributes.color;
-    if (!colorAttr) return;
+    const geometry  = mesh.geometry;
+    const colorAttr = geometry.attributes.color;
+    const indexAttr = geometry.index;
+    if (!colorAttr || !indexAttr) return;
 
     const color = new THREE.Color(hexColor);
 
     for (const tIdx of triangleIndices) {
-        const base = tIdx * 3;
-        for (let i = 0; i < 3; i++) {
-            colorAttr.setXYZ(base + i, color.r, color.g, color.b);
-        }
+        const v0 = indexAttr.getX(tIdx * 3);
+        const v1 = indexAttr.getX(tIdx * 3 + 1);
+        const v2 = indexAttr.getX(tIdx * 3 + 2);
+        colorAttr.setXYZ(v0, color.r, color.g, color.b);
+        colorAttr.setXYZ(v1, color.r, color.g, color.b);
+        colorAttr.setXYZ(v2, color.r, color.g, color.b);
     }
     colorAttr.needsUpdate = true;
 }
@@ -488,7 +475,7 @@ colorPicker.addEventListener('input', (e) => {
 
 document.querySelectorAll('.palette-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
-        colorPicker.value = e.target.getAttribute('data-color');
+        colorPicker.value = e.currentTarget.getAttribute('data-color');
     });
 });
 
@@ -521,26 +508,27 @@ undoButton.addEventListener('click', () => {
 
 saveColorsButton.addEventListener('click', () => {
     if (!currentModel) { alert('モデルが読み込まれていません。'); return; }
-    const mesh  = currentModel.children[0];
-    const attr  = mesh?.geometry?.attributes?.color;
+    const mesh = currentModel.children[0];
+    const attr = mesh?.geometry?.attributes?.color;
     if (!attr)  { alert('カラーデータがありません。'); return; }
 
     const exportData = {
         application:      'STEP Face Viewer – FaceID Mode',
         timestamp:        Date.now(),
         vertexColorCount: attr.array.length,
-        colors:           Array.from(attr.array)
+        colors:           Array.from(attr.array),
     };
 
     const blob = new Blob([JSON.stringify(exportData)], { type: 'application/json' });
     const a    = Object.assign(document.createElement('a'), {
         href:     URL.createObjectURL(blob),
-        download: 'step-colors.json'
+        download: 'step-colors.json',
     });
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
+    console.log('Color state saved.');
 });
 
 importColorsFile.addEventListener('change', (e) => {
