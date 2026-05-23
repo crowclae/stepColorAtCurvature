@@ -34,6 +34,7 @@ const viewerContainer   = document.getElementById('viewer-container');
 const undoButton        = document.getElementById('undoButton');
 const saveColorsButton  = document.getElementById('saveColorsButton');
 const importColorsFile  = document.getElementById('importColorsFile');
+const toggleEdgesButton = document.getElementById('toggleEdgesButton');
 
 
 ////////////////////////////////////////////////////////////
@@ -111,6 +112,7 @@ let isLeftMouseDown = false;
 let isRotating      = false;
 let colorHistory    = [];
 const MAX_HISTORY   = 20;
+let showEdges       = true;
 colorPicker.value = '#3498db';
 
 ////////////////////////////////////////////////////////////
@@ -168,11 +170,14 @@ async function loadStepFile(file) {
         if (currentModel) {
             scene.remove(currentModel);
             currentModel.traverse((child) => {
-                if (child.isMesh) {
+                // ★ child.isLineSegments を条件に追加
+                if (child.isMesh || child.isLineSegments) {
                     child.geometry.dispose();
                     child.material.dispose();
                 }
             });
+            currentModel = null;
+        }
             currentModel = null;
         }
         faceGroupMap    = null;
@@ -354,8 +359,21 @@ async function loadStepFile(file) {
         mesh.castShadow    = true;
         mesh.receiveShadow = true;
 
+        // ★ 追記：エッジライン（稜線）の生成
+        // 第2引数の「24」はしきい値角度です。これより急な角度の境界に線を引きます。
+        // フェイス間の境界は頂点が分離しているため、角度に関係なく綺麗に線が残ります。
+        const edgesGeometry = new THREE.EdgesGeometry(geometry, 24);
+        const edgesMaterial = new THREE.LineBasicMaterial({ 
+            color: 0x555555, // 背景(0x1e1e1e)に対して見やすい暗めのグレー（または0xffffffなど）
+            linewidth: 1     // WebGLの制限で基本1固定
+        });
+        const edgeLines = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+        edgeLines.name = 'edgeLines';
+        edgeLines.visible = showEdges; // 現在のステートを反映
+
         currentModel = new THREE.Group();
         currentModel.add(mesh);
+        currentModel.add(edgeLines); // ★ グループに追加
         scene.add(currentModel);
 
         // グローバルマップに昇格
@@ -589,6 +607,28 @@ function fitCameraToObject(obj) {
     camera.far  = maxDim * 100;
     camera.updateProjectionMatrix();
     controls.update();
+}
+
+////////////////////////////////////////////////////////////
+// Toggle Edges Command
+////////////////////////////////////////////////////////////
+
+if (toggleEdgesButton) {
+    toggleEdgesButton.addEventListener('click', () => {
+        if (!currentModel) return;
+
+        // 状態を反転
+        showEdges = !showEdges;
+        
+        // ボタンのテキストを更新
+        toggleEdgesButton.innerText = showEdges ? 'エッジ非表示' : 'エッジ表示';
+
+        // グループ内からエッジオブジェクトを探して可視性を切り替え
+        const edgeLines = currentModel.getObjectByName('edgeLines');
+        if (edgeLines) {
+            edgeLines.visible = showEdges;
+        }
+    });
 }
 
 
