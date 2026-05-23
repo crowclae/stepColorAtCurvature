@@ -649,13 +649,29 @@ viewNegYBtn.addEventListener('click', () => setCameraDirection('y', -1));
 viewPosZBtn.addEventListener('click', () => setCameraDirection('z', 1));
 viewNegZBtn.addEventListener('click', () => setCameraDirection('z', -1));
 
-// センタリングボタンの処理
+////////////////////////////////////////////////////////////
+// センタリングボタンの処理（修正版）
+////////////////////////////////////////////////////////////
 centerButton.addEventListener('click', () => {
-    if (!currentModel) return;
-    // 既存のフィッティング関数を呼び出すことで、中心移動＋全体表示を行います
-    fitCameraToObject(currentModel);
-});
+    if (!currentModel || !controls) return;
 
+    // 1. オブジェクト（グリッド以外）の中心座標を計算
+    const box = new THREE.Box3().setFromObject(currentModel);
+    const newCenter = box.getCenter(new THREE.Vector3());
+
+    // 2. 現在のターゲット（注視点）から新しい中心への移動量を計算
+    const oldCenter = controls.target.clone();
+    const offset = new THREE.Vector3().subVectors(newCenter, oldCenter);
+
+    // 3. カメラの位置とコントロールのターゲットを、同じ移動量だけ平行移動
+    camera.position.add(offset);
+    controls.target.copy(newCenter);
+
+    // コントロールを更新して画面に反映
+    controls.update();
+    
+    console.log('Centered object while keeping current view angle.');
+});
 ////////////////////////////////////////////////////////////
 // Resize
 ////////////////////////////////////////////////////////////
