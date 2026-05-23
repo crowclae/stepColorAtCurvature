@@ -178,8 +178,7 @@ async function loadStepFile(file) {
             });
             currentModel = null;
         }
-            currentModel = null;
-        }
+
         faceGroupMap    = null;
         faceIdPerVertex = null;
         colorHistory    = [];
