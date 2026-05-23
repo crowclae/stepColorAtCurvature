@@ -128,6 +128,7 @@ let isRotating      = false;
 let colorHistory    = [];
 const MAX_HISTORY   = 20;
 let showEdges       = true;
+let showGrid        = true;
 colorPicker.value = '#3498db';
 
 ////////////////////////////////////////////////////////////
@@ -515,6 +516,13 @@ undoButton.addEventListener('click', () => {
     attr.needsUpdate = true;
 });
 
+////////////////////////////////////////////////////////////
+// Grid
+////////////////////////////////////////////////////////////
+
+const gridHelper = new THREE.GridHelper(500, 50, 0x444444, 0x2a2a2a);
+gridHelper.name = 'gridHelper'; // ★これを追記（後から探し出せるように名前を付ける）
+scene.add(gridHelper);
 
 ////////////////////////////////////////////////////////////
 // Save / Load Color JSON
@@ -626,6 +634,26 @@ if (toggleEdgesButton) {
         const edgeLines = currentModel.getObjectByName('edgeLines');
         if (edgeLines) {
             edgeLines.visible = showEdges;
+        }
+    });
+}
+
+////////////////////////////////////////////////////////////
+// Toggle Grid Command（★これを新規追記）
+////////////////////////////////////////////////////////////
+
+if (toggleGridButton) {
+    toggleGridButton.addEventListener('click', () => {
+        // 状態を反転
+        showGrid = !showGrid;
+        
+        // ボタンのテキストを更新
+        toggleGridButton.innerText = showGrid ? 'グリッド非表示' : 'グリッド表示';
+
+        // シーン全体から名前をキーにグリッドオブジェクトを探す
+        const grid = scene.getObjectByName('gridHelper');
+        if (grid) {
+            grid.visible = showGrid; // 可視性を切り替え
         }
     });
 }
