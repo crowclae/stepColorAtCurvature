@@ -111,7 +111,7 @@ let isLeftMouseDown = false;
 let isRotating      = false;
 let colorHistory    = [];
 const MAX_HISTORY   = 20;
-
+colorPicker.value = '#3498db';
 
 ////////////////////////////////////////////////////////////
 // opencascade.js 初期化
@@ -331,17 +331,15 @@ async function loadStepFile(file) {
             geometry.computeVertexNormals();
         }
 
-        // 頂点カラー（デフォルト：グレー）
+
+        // 頂点カラー（デフォルト：#3498db）
         const vertexCount = allPositions.length / 3;
-        // 変更後
-        const r = 52  / 255;
-        const g = 152 / 255;
-        const b = 219 / 255;
+        const defaultColor = new THREE.Color('#3498db'); // HEXで直接指定
         const colors = new Float32Array(vertexCount * 3);
         for (let i = 0; i < vertexCount; i++) {
-            colors[i * 3]     = r;
-            colors[i * 3 + 1] = g;
-            colors[i * 3 + 2] = b;
+            colors[i * 3]     = defaultColor.r;
+            colors[i * 3 + 1] = defaultColor.g;
+            colors[i * 3 + 2] = defaultColor.b;
         }
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
