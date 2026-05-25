@@ -82,6 +82,8 @@
             top: 16px;
             left: 16px;
             width: 220px;
+            /* 画面の高さから上下の余白（16px × 2 = 32px）を引いた値を最大高さにする */
+            max-height: calc(100vh - 32px); 
             background: rgba(20,20,28,0.92);
             border: 1px solid #333;
             border-radius: 12px;
@@ -90,6 +92,26 @@
             flex-direction: column;
             gap: 14px;
             z-index: 10;
+            
+            /* 縦解像度が足りないときだけサイドバー内をスクロールさせる */
+            overflow-y: auto; 
+            /* 横スクロールは絶対に発生させない */
+            overflow-x: hidden; 
+        }
+
+        /* 画面に馴染むカスタムスクロールバー（オプションですが推奨） */
+        #sidebar::-webkit-scrollbar {
+            width: 6px;
+        }
+        #sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #sidebar::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 3px;
+        }
+        #sidebar::-webkit-scrollbar-thumb:hover {
+            background: #7dd3fc;
         }
 
         #sidebar h2 {
